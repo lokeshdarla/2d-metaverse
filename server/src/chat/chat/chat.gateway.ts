@@ -12,7 +12,7 @@ import { Server, Socket } from 'socket.io';
 
 interface Ball {
   id: string;
-  color: string;
+  imageUrl: string;
   position: { x: number; y: number };
 }
 
@@ -63,16 +63,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('joinGame')
   handleJoinGame(
-    @MessageBody() data: { color: string; position: { x: number; y: number } },
+    @MessageBody() data: { imageUrl: string; position: { x: number; y: number } },
     @ConnectedSocket() client: Socket,
   ) {
     console.log(`Received joinGame event from ${client.id}`);
 
-    const newBall: Ball = { id: client.id, color: data.color, position: data.position };
+    const newBall: Ball = { id: client.id, imageUrl: data.imageUrl, position: data.position };
     this.balls.push(newBall);
 
     // Log the new ball and broadcast the updated list of balls
-    this.logger.log(`User ${client.id} joined with color: ${data.color}`);
+    this.logger.log(`User ${client.id} joined with imageUrl: ${data.imageUrl}`);
     console.log(`Current balls after ${client.id} joined:`, this.balls);
 
     this.server.emit('updateBalls', this.balls);

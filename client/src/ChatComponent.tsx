@@ -3,13 +3,13 @@ import { io, Socket } from 'socket.io-client';
 
 interface Ball {
   id: string;
-  color: string;
+  imageUrl: string;
   position: { x: number; y: number };
 }
 
 const BallGame: React.FC = () => {
   let socket: Socket;
-  const [ballColor, setBallColor] = useState<string>('');
+  const [imageUrl, setImageUrl] = useState<string>('');
   const [ballPosition, setBallPosition] = useState({ x: 200, y: 200 });
   const [balls, setBalls] = useState<Ball[]>([]);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -18,21 +18,16 @@ const BallGame: React.FC = () => {
     const SOCKET_URL = 'http://localhost:3001';
     socket = io(SOCKET_URL, { transports: ['websocket'] });
 
-    //setSocket(newSocket);
     socket.on('connect', () => {
       console.log('Connected to WebSocket server');
-      const randomColor = '#' + Math.floor(Math.random() * 16777215).toString(16);
-      setBallColor(randomColor);
 
       if (socket && socket.id) {
-        const newBall: Ball = { id: socket.id, color: randomColor, position: ballPosition };
+        const newBall: Ball = { id: socket.id, imageUrl, position: ballPosition };
         socket.emit('joinGame', newBall);
       }
-
     });
 
     socket.on('updateBalls', (updatedBalls: Ball[]) => {
-      console.log('Updating balls:', updatedBalls);
       setBalls(updatedBalls);
     });
 
@@ -40,18 +35,15 @@ const BallGame: React.FC = () => {
       socket.disconnect();
       console.log('Disconnected from WebSocket server');
     };
-  }, []);
+  }, [imageUrl]);
 
   const moveBall = (dx: number, dy: number) => {
-
     setBallPosition((prevPos) => {
       const newX = prevPos.x + dx;
       const newY = prevPos.y + dy;
       const newPos = { x: newX, y: newY };
-      console.log(socket);
 
       if (socket) {
-        console.log("Emiting event");
         socket.emit('moveBall', { id: socket.id, position: newPos });
       }
       return newPos;
@@ -59,6 +51,7 @@ const BallGame: React.FC = () => {
   };
 
   const handleKeyDown = (e: KeyboardEvent) => {
+    console.log("Event")
     switch (e.key) {
       case 'ArrowUp':
       case 'w':
@@ -94,11 +87,17 @@ const BallGame: React.FC = () => {
         drawGrid(ctx);
 
         balls.forEach((ball) => {
-          ctx.beginPath();
-          ctx.arc(ball.position.x, ball.position.y, 20, 0, 2 * Math.PI);
-          ctx.fillStyle = ball.color;
-          ctx.fill();
-          ctx.closePath();
+          const img = new Image();
+          img.src = ball.imageUrl;
+          img.onload = () => {
+            ctx.save();
+            ctx.beginPath();
+            ctx.arc(ball.position.x, ball.position.y, 20, 0, 2 * Math.PI);
+            ctx.clip();
+            ctx.drawImage(img, ball.position.x - 20, ball.position.y - 20, 40, 40);
+            ctx.closePath();
+            ctx.restore();
+          };
         });
       }
     }
@@ -132,14 +131,46 @@ const BallGame: React.FC = () => {
   }, [balls]);
 
   return (
-    <div className="ball-game">
-      <canvas
-        ref={canvasRef}
-        width={800}
-        height={600}
-        style={{ border: '1px solid black', display: 'block', margin: '0 auto' }}
-      ></canvas>
-      <div>Move the ball with arrow keys or WSAD keys!</div>
+    <div className="ball-game" style={{ display: 'flex' }}>
+      <div style={{ width: '200px', padding: '10px', backgroundColor: '#f4f4f4', borderRight: '1px solid #ccc' }}>
+        <h3>Joined Users</h3>
+        {balls.map((ball) => (
+          <div key={ball.id} style={{ margin: '10px 0', display: 'flex', alignItems: 'center' }}>
+            <div
+              style={{
+                width: '20px',
+                height: '20px',
+                borderRadius: '50%',
+                backgroundImage: `url(${ball.imageUrl})`,
+                backgroundSize: 'cover',
+                marginRight: '10px',
+              }}
+            ></div>
+            <span>{ball.id.slice(0, 5)}</span>
+          </div>
+        ))}
+        <input
+          type="text"
+          placeholder="Enter image URL"
+          value={imageUrl}
+          onChange={(e) => setImageUrl(e.target.value)}
+          style={{ width: '100%', marginTop: '10px' }}
+        />
+      </div>
+
+      <div style={{ flexGrow: 1, textAlign: 'center' }}>
+        <canvas
+          ref={canvasRef}
+          width={800}
+          height={600}
+          style={{
+            border: '1px solid black',
+            margin: '20px auto',
+            display: 'block',
+          }}
+        ></canvas>
+        <div>Move the ball with arrow keys or WSAD keys!</div>
+      </div>
     </div>
   );
 };
