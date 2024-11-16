@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
-import io, { Socket } from 'socket.io-client';
+import io from 'socket.io-client';
 
 interface RemoteStream {
   id: string;
@@ -8,6 +8,7 @@ interface RemoteStream {
 }
 
 interface VideoCallContextProps {
+  socketRef: any,
   isCalling: boolean;
   remoteStreams: RemoteStream[];
   isCameraOn: boolean;
@@ -26,7 +27,7 @@ interface VideoCallProviderProps {
 }
 
 export const VideoCallProvider: React.FC<VideoCallProviderProps> = ({ children }) => {
-  const socketRef = useRef<Socket | null>(null);
+  const socketRef = useRef<any | null>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const [isCalling, setIsCalling] = useState<boolean>(false);
@@ -38,7 +39,7 @@ export const VideoCallProvider: React.FC<VideoCallProviderProps> = ({ children }
 
   useEffect(() => {
     console.log('Initializing WebSocket connection...');
-    socketRef.current = io('https://bb15-2a09-bac5-3b22-1a8c-00-2a5-f2.ngrok-free.app', { transports: ['websocket'] });
+    socketRef.current = io('http://localhost:3002', { transports: ['websocket'] });
 
     socketRef.current.on('offer', handleOffer);
     socketRef.current.on('answer', handleAnswer);
@@ -67,8 +68,6 @@ export const VideoCallProvider: React.FC<VideoCallProviderProps> = ({ children }
 
   const handleToggleMic = (data: { isMicOn: boolean; userId: string }) => {
     console.log("Toggling Mic");
-    console.log(data);
-    console.log(remoteStreams);
     setRemoteStreams((prevStreams) =>
       prevStreams.map((stream) =>
         stream.id === data.userId ? { ...stream, isMicOn: data.isMicOn } : stream
@@ -76,10 +75,17 @@ export const VideoCallProvider: React.FC<VideoCallProviderProps> = ({ children }
     );
   };
 
-  const handleOffer = async (offer: RTCSessionDescriptionInit, userId: string) => {
-    console.log("Received offer from user:", userId, offer);
+  const handleOffer = async (data: { offer: RTCSessionDescriptionInit; userId: string }) => {
+    console.log("Received offer from user:", data.userId, data.offer);
     const peerConnection = new RTCPeerConnection();
     peerConnectionRef.current = peerConnection;
+
+    // peerConnection.onicecandidate = (event) => {
+    //   if (event.candidate) {
+    //     console.log("Sending ICE candidate:", event.candidate);
+    //     socketRef.current?.emit("candidate", { candidate: event.candidate, to: data.userId });
+    //   }
+    // };
 
     if (localStreamRef.current) {
       console.log("Adding local tracks to peer connection...");
@@ -87,7 +93,7 @@ export const VideoCallProvider: React.FC<VideoCallProviderProps> = ({ children }
       localStreamRef.current.getTracks().forEach((track) => peerConnection.addTrack(track, localStreamRef.current));
     }
 
-    await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+    await peerConnection.setRemoteDescription(new RTCSessionDescription(data.offer));
     console.log("Remote description set.");
 
     const answer = await peerConnection.createAnswer();
@@ -98,15 +104,15 @@ export const VideoCallProvider: React.FC<VideoCallProviderProps> = ({ children }
     socketRef.current?.emit('answer', answer);
     console.log("Answer sent to server.");
 
+
     peerConnection.ontrack = (event: RTCTrackEvent) => {
-      console.log("Received remote track from user:", userId);
+      console.log("Received remote track from user:", data.userId);
 
-      const existingStream = remoteStreams.find(stream => stream.id === userId);
-
-      if (!existingStream) {
+      const existingStream = remoteStreams.find(stream => stream.id === data.userId);
+      if (!existingStream && socketRef.current.id !== data.userId) {
         setRemoteStreams((prevStreams) => [
           ...prevStreams,
-          { id: userId, stream: event.streams[0], isMicOn: true },
+          { id: data.userId, stream: event.streams[0], isMicOn: true },
         ]);
       }
     };
@@ -118,6 +124,7 @@ export const VideoCallProvider: React.FC<VideoCallProviderProps> = ({ children }
       try {
         await peerConnectionRef.current.setRemoteDescription(new RTCSessionDescription(answer));
         console.log('Remote description set.');
+        return;
       } catch (error) {
         console.error('Failed to set remote description:', error);
       }
@@ -128,6 +135,7 @@ export const VideoCallProvider: React.FC<VideoCallProviderProps> = ({ children }
     console.log('Received ICE candidate:', candidate);
     const iceCandidate = new RTCIceCandidate(candidate);
     peerConnectionRef.current?.addIceCandidate(iceCandidate);
+    return;
   };
 
   const handleStartCall = async () => {
@@ -150,12 +158,12 @@ export const VideoCallProvider: React.FC<VideoCallProviderProps> = ({ children }
     console.log("Offer sent to server.");
 
     peerConnection.ontrack = (event: RTCTrackEvent) => {
-      const userId = "user_" + Date.now(); // Example: generate a unique ID
+      const userId = socketRef.current.id; // Example: generate a unique ID
       console.log("Received remote track from user:", userId);
 
       const existingStream = remoteStreams.find(stream => stream.id === userId);
 
-      if (!existingStream) {
+      if (!existingStream && socketRef.current.id != userId) {
         setRemoteStreams((prevStreams) => [
           ...prevStreams,
           { id: userId, stream: event.streams[0], isMicOn: true },
@@ -205,6 +213,7 @@ export const VideoCallProvider: React.FC<VideoCallProviderProps> = ({ children }
   return (
     <VideoCallContext.Provider
       value={{
+        socketRef,
         isCalling,
         remoteStreams,
         isCameraOn,

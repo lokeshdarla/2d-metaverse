@@ -1,13 +1,27 @@
-import React from 'react';
-import { VideoCallProvider } from './VideoCallContext';
+// import React from 'react';
+// import { VideoCallProvider } from './VideoCallContext';
+// import VideoCall from './VideoCall';
+
+// const App: React.FC = () => {
+//   return (
+//     <VideoCallProvider>
+//       <VideoCall />
+//     </VideoCallProvider>
+//   );
+// };
+
+// export default App;\
+
+import { SocketProvider } from './hooks/SocketContext';
 import VideoCall from './VideoCall';
 
-const App: React.FC = () => {
+const App = () => {
   return (
-    <VideoCallProvider>
+    <SocketProvider>
       <VideoCall />
-    </VideoCallProvider>
+    </SocketProvider>
   );
 };
 
 export default App;
+
