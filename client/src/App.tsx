@@ -1,17 +1,13 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
-import BallGame from './ChatComponent'
+import React from 'react';
+import { VideoCallProvider } from './VideoCallContext';
+import VideoCall from './VideoCall';
 
-function App() {
-  const [count, setCount] = useState(0)
-
+const App: React.FC = () => {
   return (
-    <>
-      <BallGame />
-    </>
-  )
-}
+    <VideoCallProvider>
+      <VideoCall />
+    </VideoCallProvider>
+  );
+};
 
-export default App
+export default App;
