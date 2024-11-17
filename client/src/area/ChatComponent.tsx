@@ -46,10 +46,10 @@ const BallGame: React.FC = () => {
       if (socket) {
         socket.emit('moveBall', { id: socket.id, position: newPos });
       }
+      console.log("moving ball");
       return newPos;
     });
   };
-
   const handleKeyDown = (e: KeyboardEvent) => {
     console.log("Event")
     switch (e.key) {
