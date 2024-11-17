@@ -2,3 +2,8 @@ body {
   background-color: black;
   color: aliceblue;
 }
+
+
+video {
+  width: 500px;
+}

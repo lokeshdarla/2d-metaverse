@@ -30,17 +30,17 @@ export class SignalingGateway {
   // Handle incoming offer
   @SubscribeMessage('offer')
   handleOffer(@MessageBody() { roomId, offer }: { roomId: string; offer: string }, @ConnectedSocket() client: Socket) {
-    console.log(`Received offer from ${client.id} in room ${roomId}`);
+    console.log(`[OFFER] Received offer from ${client.id} in room ${roomId}`);
     // Send the offer to other peers in the room
-    client.to(roomId).emit('offer', { offer, userId: client.id });
+    client.to(roomId).emit('offer', { peerId: client.id, offer });
   }
 
   // Handle incoming answer
   @SubscribeMessage('answer')
   handleAnswer(@MessageBody() { roomId, answer }: { roomId: string; answer: string }, @ConnectedSocket() client: Socket) {
-    console.log(`Received answer from ${client.id} in room ${roomId}`);
+    console.log(`[ANSWER] Received answer from ${client.id} in room ${roomId}`);
     // Send the answer to other peers in the room
-    client.to(roomId).emit('answer', { answer, userId: client.id });
+    client.to(roomId).emit('answer', { userId: client.id, answer, });
   }
 
   // Handle incoming ICE candidate
@@ -74,6 +74,29 @@ export class SignalingGateway {
     // Notify other peers in the room that the call has ended
     client.to(roomId).emit('endCall', { userId: client.id });
   }
+
+
+  @SubscribeMessage('leaveRoom')
+  handleLeaveRoom(@MessageBody() roomId: string, @ConnectedSocket() client: Socket) {
+    console.log(`Client ${client.id} left room: ${roomId}`);
+
+    if (this.rooms[roomId] && this.rooms[roomId].has(client.id)) {
+      this.rooms[roomId].delete(client.id);
+
+      // Notify other peers in the room
+      client.to(roomId).emit('peerLeft', { userId: client.id });
+      console.log(`Peer left notification sent to room ${roomId}`);
+
+      // Clean up room if no clients remain
+      if (this.rooms[roomId].size === 0) {
+        delete this.rooms[roomId];
+      }
+    }
+
+    // Leave the room on the Socket.IO side
+    client.leave(roomId);
+  }
+
 
   // Handle client disconnect
   @SubscribeMessage('disconnect')

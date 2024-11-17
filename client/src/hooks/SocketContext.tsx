@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode, useRef } from 'react';
 import io from 'socket.io-client';
+import Peer from 'simple-peer';
 
 // Define types for the context value
 interface SocketContextProps {
@@ -26,21 +27,28 @@ interface SocketProviderProps {
 export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   const [peerConnections, setPeerConnections] = useState<{ [id: string]: RTCPeerConnection }>({});
   const [remoteStreams, setRemoteStreams] = useState<{ [id: string]: MediaStream }>({});
+  const [roomId, setRoomId] = useState<string>('');
   const iceServers = {
     iceServers: [
-      { urls: 'stun:stun.l.google.com:19302' }, // Public STUN server
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
     ],
   };
 
+
   const [socket, setSocket] = useState<any | null>(null);
+  let socketInstance: any;
   // const localStreamRef = useRef<MediaStream | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
 
 
+  const peerConnectionsRef = useRef<{ [id: string]: RTCPeerConnection }>({});
+
   const createPeerConnection = (peerId: string): RTCPeerConnection => {
+    console.log(`Creating peer connection ${peerId}`)
     const peerConnection = new RTCPeerConnection(iceServers);
 
-    // Add local stream to peer connection
+    // Add local stream
     if (localVideoRef.current?.srcObject) {
       const localStream = localVideoRef.current.srcObject as MediaStream;
       localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
@@ -48,8 +56,11 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
 
     // Handle remote stream
     peerConnection.ontrack = (event) => {
-      const [remoteStream] = event.streams;
+      const remoteStream = event.streams[0];
       setRemoteStreams((prev) => ({ ...prev, [peerId]: remoteStream }));
+      console.log(remoteStream);
+      console.log('PEERCONNECTION ON TRACK');
+      console.log(remoteStreams);
     };
 
     // Handle ICE candidates
@@ -67,20 +78,23 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
           delete updated[peerId];
           return updated;
         });
-        console.log(`Peer ${peerId} disconnected`);
       }
     };
 
-    // Save the peer connection
+    // Save peer connection in ref (to avoid stale state)
+    peerConnectionsRef.current[peerId] = peerConnection;
+
+    // Optionally, trigger a state update to re-render the component
     setPeerConnections((prev) => ({ ...prev, [peerId]: peerConnection }));
 
     return peerConnection;
   };
 
 
+
   // Initialize socket connection
   useEffect(() => {
-    const socketInstance = io('http://localhost:3002', {
+    socketInstance = io('http://localhost:3002', {
       transports: ['websocket'],
     });
 
@@ -90,22 +104,42 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       console.log('Connected to signaling server');
     });
 
-    socketInstance.on('peerJoined', ({ userId }: { userId: string }) => {
-      console.log(`Peer joined: ${userId}`);
+    // When a new peer joins
+    socketInstance.on('peerJoined', async ({ userId }: { userId: string }) => {
+      console.log(`New peer joined: ${userId}`);
+      console.log(!peerConnections[userId]);
+      if (!peerConnections[userId]) {
+        console.log("Into if universe")
+        const peerConnection = createPeerConnection(userId);
+
+        // Create an offer and send it to the new peer
+        const offer = await peerConnection.createOffer();
+        console.log("waiting to set LocalDescription in  if universe")
+        await peerConnection.setLocalDescription(offer);
+        console.log("Finally remote description has been set");
+        sendOffer('room123', offer);
+      }
     });
 
-    socket?.on('offer', async ({ peerId, offer }: { peerId: string; offer: RTCSessionDescriptionInit }) => {
-      const peerConnection = createPeerConnection(peerId);
-      await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
+    // Handle incoming offer
+    socketInstance.on('offer', async ({ peerId, offer }: { peerId: string; offer: RTCSessionDescriptionInit }) => {
+      console.log(`[OFFER] Received offer from ${peerId} in room ${'room123'}`);
+      if (!peerConnections[peerId]) {
+        console.log('creating a peerConnection')
+        const peerConnection = createPeerConnection(peerId);
+        await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
 
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
 
-      sendAnswer(peerId, answer);
+        sendAnswer('room123', answer);
+      }
     });
 
-
-    socket?.on('answer', async ({ peerId, answer }: { peerId: string; answer: RTCSessionDescriptionInit }) => {
+    // Handle incoming answer
+    socketInstance.on('answer', async ({ peerId, answer }: { peerId: string; answer: RTCSessionDescriptionInit }) => {
+      console.log(peerConnections);
+      console.log(peerId);
       const peerConnection = peerConnections[peerId];
       if (peerConnection) {
         await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
@@ -113,8 +147,8 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       }
     });
 
-
-    socket?.on('candidate', async ({ peerId, candidate }: { peerId: string; candidate: RTCIceCandidate }) => {
+    // Handle ICE candidates
+    socketInstance.on('candidate', async ({ peerId, candidate }: { peerId: string; candidate: RTCIceCandidate }) => {
       const peerConnection = peerConnections[peerId];
       if (peerConnection) {
         await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
@@ -122,26 +156,20 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       }
     });
 
-    socket?.on('peerJoined', async ({ peerId }: { peerId: string }) => {
-      console.log(`Peer joined: ${peerId}`);
-      const peerConnection = createPeerConnection(peerId);
-
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-
-      sendOffer(peerId, offer);
-    });
-
-    socket?.on('peerLeft', ({ peerId }: { peerId: string }) => {
+    // Handle peer disconnection
+    socketInstance.on('peerLeft', ({ peerId }: { peerId: string }) => {
       console.log(`Peer left: ${peerId}`);
       const peerConnection = peerConnections[peerId];
       if (peerConnection) {
         peerConnection.close();
+
+        // Clean up state
         setPeerConnections((prev) => {
           const updated = { ...prev };
           delete updated[peerId];
           return updated;
         });
+
         setRemoteStreams((prev) => {
           const updated = { ...prev };
           delete updated[peerId];
@@ -150,32 +178,12 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
       }
     });
 
-    socketInstance.on('toggleCamera', (data: any) => {
-      console.log('Camera toggle status:', data);
-    });
-
-    socketInstance.on('toggleMic', (data: any) => {
-      console.log('Mic toggle status:', data);
-    });
-
-    socketInstance.on('endCall', (data: any) => {
-      console.log('Call ended:', data);
-    });
-
-    socketInstance.on('peerLeft', ({ userId }: { userId: string }) => {
-      console.log(`Peer left: ${userId}`);
-    });
-
-    socketInstance.on('disconnect', () => {
-      console.log('Disconnected from signaling server');
-    });
-
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+    navigator.mediaDevices
+      .getUserMedia({ video: true, audio: true })
       .then((stream) => {
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
         }
-
       })
       .catch((error) => {
         console.error('Error accessing media devices.', error);
@@ -186,17 +194,26 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     };
   }, []);
 
+
   const joinRoom = (roomId: string) => {
     socket?.emit('joinRoom', roomId);
     console.log(`Joined room: ${roomId}`);
+    setRoomId(roomId);
   };
 
   const sendOffer = (roomId: string, offer: RTCSessionDescriptionInit) => {
-    socket?.emit('offer', { roomId, offer });
+
+    if (socketInstance) {
+      console.log(`Sending the offer to the room: ${roomId}`);
+      socketInstance.emit('offer', { roomId, offer });
+    }
   };
 
   const sendAnswer = (roomId: string, answer: RTCSessionDescriptionInit) => {
-    socket?.emit('answer', { roomId, answer });
+    if (socketInstance) {
+      console.log(`[ANSWER] sending answer to the room`);
+      socketInstance.emit('answer', { roomId, answer });
+    }
   };
 
   const sendCandidate = (roomId: string, candidate: RTCIceCandidate) => {
